@@ -13,7 +13,7 @@ from torch.optim.lr_scheduler import _LRScheduler
 from tqdm.auto import tqdm
 import wandb
 
-from transformers.constants import DataSplit
+from constants import DataSplit
 
 
 @dataclass
