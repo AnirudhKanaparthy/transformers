@@ -3,7 +3,7 @@ import torch
 from torch import Tensor
 from torch.nn import Module
 
-from constants import DataSplit
+from transformers.constants import DataSplit
 from tqdm import tqdm
 from typing import Callable
 
@@ -66,8 +66,8 @@ def train_transformer(model: Module,
                 f'Iteration[{iter + 1 : >{t_indent}}/{maximum_iterations}], Training Loss: {losses[DataSplit.TRAIN.name] : .6f}, Validation Loss: {losses[DataSplit.VALIDATION.name]: .6f}')
 
         xb, yb = get_batch_for_split(DataSplit.TRAIN)
-        logits = model(xb)
-        loss = model.calculate_loss(logits, yb)
+        logits: Tensor = model(xb)
+        loss: Tensor = model.calculate_loss(logits, yb)
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
