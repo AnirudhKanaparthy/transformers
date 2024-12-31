@@ -30,10 +30,11 @@ def estimate_loss(model: Module,
         losses = torch.zeros(eval_iterations)
         for k in range(eval_iterations):
             xb, yb = get_data(split)
-            logits, loss = model(xb, yb)
+            logits = model(xb)
+            loss = model.calculate_loss(logits, yb)
 
             losses[k] = loss.item()
-        out[split] = losses.mean()
+        out[split.name] = losses.mean()
 
     model.train()
     return out
@@ -49,7 +50,7 @@ def train_transformer(model: Module,
                       eval_iterations: int,
                       device: str = 'cpu',
                       ):
-    all_losses = {DataSplit.TRAIN: [], DataSplit.VALIDATION: []}
+    all_losses = {DataSplit.TRAIN.name: [], DataSplit.VALIDATION.name: []}
     t_indent = len(str(maximum_iterations))
 
     def get_batch_for_split(split: DataSplit) -> tuple[Tensor, Tensor]:
@@ -62,10 +63,11 @@ def train_transformer(model: Module,
             [all_losses[k].append(losses[k].item()) for k in losses]
 
             print(
-                f'Iteration[{iter + 1 : >{t_indent}}/{maximum_iterations}], Training Loss: {losses[DataSplit.TRAIN] : .6f}, Validation Loss: {losses[DataSplit.VALIDATION]: .6f}')
+                f'Iteration[{iter + 1 : >{t_indent}}/{maximum_iterations}], Training Loss: {losses[DataSplit.TRAIN.name] : .6f}, Validation Loss: {losses[DataSplit.VALIDATION.name]: .6f}')
 
         xb, yb = get_batch_for_split(DataSplit.TRAIN)
-        logits, loss = model(xb, yb)
+        logits = model(xb)
+        loss = model.calculate_loss(logits, yb)
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
@@ -73,6 +75,6 @@ def train_transformer(model: Module,
         optimizer.step()
 
     print(
-        f'Final Loss:\n\tTraining: {losses[DataSplit.TRAIN] : .6f}\n\tValidation: {losses[DataSplit.VALIDATION]: .6f}')
+        f'Final Loss:\n\tTraining: {losses[DataSplit.TRAIN.name] : .6f}\n\tValidation: {losses[DataSplit.VALIDATION.name]: .6f}')
 
     return all_losses

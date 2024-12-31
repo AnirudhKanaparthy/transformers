@@ -9,28 +9,37 @@ class Head(nn.Module):
                  head_size: int,
                  embedding_dim: int,
                  context_length: int,
+                 bidirectional_attention: bool = False,
                  dropout: float = 0.5,
                  ):
         super().__init__()
 
         self._head_size = head_size
+        self._bidirectional_attention = bidirectional_attention
         self._key = nn.Linear(embedding_dim, head_size, bias=False)
         self._query = nn.Linear(embedding_dim, head_size, bias=False)
         self._value = nn.Linear(embedding_dim, head_size, bias=False)
 
-        # `_tril` won't be trained but needs to be in the `state_dict`
-        self.register_buffer('_tril', torch.tril(
-            torch.ones(context_length, context_length)))
+        if not self._bidirectional_attention:
+            # `_tril` won't be trained but needs to be in the `state_dict`
+            self.register_buffer('_tril', torch.tril(
+                torch.ones(context_length, context_length)))
+
         self._dropout = nn.Dropout(dropout)
 
     def forward(self, x: Tensor) -> Tensor:
+        # This is the core of the Transformer architecture
         B, T, C = x.shape
 
         k = self._key(x)
         q = self._query(x)
 
         wei = q @ k.transpose(-2, -1) * C ** -0.5
-        wei = wei.masked_fill(self._tril[:T, :T] == 0, float('-inf'))
+
+        # Only if the bidirectional attention is not allowed do we make a mask
+        if not self._bidirectional_attention:
+            wei = wei.masked_fill(self._tril[:T, :T] == 0, float('-inf'))
+
         wei = torch.softmax(wei, dim=-1)
         wei = self._dropout(wei)
 
@@ -44,11 +53,12 @@ class MultiHeadAttention(nn.Module):
                  head_size: int,
                  embedding_dim: int,
                  context_length: int,
+                 bidirectional_attention: bool = False,
                  dropout: float = 0.5,
                  ):
         super().__init__()
         self._heads = nn.ModuleList(
-            [Head(head_size, embedding_dim, context_length, dropout) for _ in range(number_of_heads)])
+            [Head(head_size, embedding_dim, context_length, bidirectional_attention, dropout) for _ in range(number_of_heads)])
         self._proj = nn.Linear(embedding_dim, embedding_dim)
         self._dropout = nn.Dropout(dropout)
 
@@ -61,13 +71,14 @@ class MultiHeadAttention(nn.Module):
 class FeedForward(nn.Module):
     def __init__(self,
                  embedding_dim: int,
+                 scale: int = 4,
                  dropout: float = 0.5
                  ):
         super().__init__()
         self._net = nn.Sequential(
-            nn.Linear(embedding_dim, 4 * embedding_dim),
+            nn.Linear(embedding_dim, scale * embedding_dim),
             nn.ReLU(),
-            nn.Linear(4 * embedding_dim, embedding_dim),
+            nn.Linear(scale * embedding_dim, embedding_dim),
             nn.Dropout(dropout),
         )
 
@@ -80,15 +91,21 @@ class Block(nn.Module):
                  embedding_dim: int,
                  number_of_heads: int,
                  context_length: int,
+                 linear_layer_scale: int = 4,
+                 bidirectional_attention: bool = False,
                  dropout: float = 0.5):
         super().__init__()
-        head_size = embedding_dim // number_of_heads
-        self._sa = MultiHeadAttention(
-            number_of_heads, head_size, embedding_dim, context_length, dropout)
-        self._ffwd = FeedForward(embedding_dim, dropout)
+        # The embedding dimension should be divisible by the number of heads
+        head_size = torch.math.ceil(embedding_dim / number_of_heads)
+        self._embedding_dim = head_size * number_of_heads
 
-        self._ln1 = nn.LayerNorm(embedding_dim)
-        self._ln2 = nn.LayerNorm(embedding_dim)
+        self._sa = MultiHeadAttention(
+            number_of_heads, head_size, self._embedding_dim, context_length, bidirectional_attention, dropout)
+        self._ffwd = FeedForward(
+            self._embedding_dim, linear_layer_scale, dropout)
+
+        self._ln1 = nn.LayerNorm(self._embedding_dim)
+        self._ln2 = nn.LayerNorm(self._embedding_dim)
 
     def forward(self, x: Tensor) -> Tensor:
         # Added Residual Connections
@@ -98,13 +115,15 @@ class Block(nn.Module):
         return x
 
 
-class TransformerDecoder(nn.Module):
+class Transformer(nn.Module):
     def __init__(self,
                  vocabulary_size: int,
                  embedding_dim: int,
                  context_length: int,
                  number_of_layers: int,
                  number_of_heads: int = 1,
+                 linear_layer_scale: int = 4,
+                 bidirectional_attention: bool = False,
                  dropout: float = 0.5,
                  device: str = 'cpu'):
         super().__init__()
@@ -117,11 +136,11 @@ class TransformerDecoder(nn.Module):
 
         # We essentially repeat the above multiple times.
         self._blocks = nn.Sequential(
-            *[Block(embedding_dim, number_of_heads, self._context_length, dropout) for _ in range(number_of_layers)])
+            *[Block(embedding_dim, number_of_heads, self._context_length, linear_layer_scale, bidirectional_attention, dropout) for _ in range(number_of_layers)])
         self._layernorm = nn.LayerNorm(embedding_dim)
         self._lm_head = nn.Linear(embedding_dim, vocabulary_size)
 
-    def forward(self, idx: Tensor, targets: Union[Tensor, None] = None) -> tuple[Tensor, Union[Tensor, None]]:
+    def forward(self, idx: Tensor) -> Tensor:
         # idx and targets are tensors of shape (Batch Size, Context Length)
         # (B, T)
         B, T = idx.shape
@@ -135,23 +154,23 @@ class TransformerDecoder(nn.Module):
         x = self._layernorm(x)
 
         logits = self._lm_head(x)
+        return logits
 
-        if targets is None:
-            loss = None
-        else:
-            B, T, C = logits.shape
-            logits = logits.view(B * T, C)
-            targets = targets.view(B * T)
+    def calculate_loss(self, logits: Tensor, targets: Tensor) -> Tensor:
+        B, T, C = logits.shape
+        logits = logits.view(B * T, C)
+        targets = targets.view(B * T)
 
-            loss = F.cross_entropy(logits, targets)
-
-        return logits, loss
+        loss = F.cross_entropy(logits, targets)
+        return loss
 
     def generate(self, idx: Tensor, max_next_tokens: int) -> Tensor:
         for _ in range(max_next_tokens):
+            # The input contains batches. We take in all the batches
+            # and within those branches we take in the last `context_length` number of token
             idx_cond = idx[:, -self._context_length:]
 
-            logits, loss = self(idx_cond)
+            logits = self(idx_cond)
 
             logits = logits[:, -1, :]
             probs = F.softmax(logits, dim=-1)
