@@ -11,7 +11,6 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 
 from tqdm.auto import tqdm
-import wandb
 
 from constants import DataSplit
 
@@ -26,7 +25,6 @@ class TrainingConfig:
     checkpoint_interval: int
     checkpoint_dir: str
     device: str = 'cpu'
-    use_wandb: bool = False
     project_name: str = 'transformer_training'
     experiment_name: str = f'run_{int(time.time())}'
 
@@ -150,11 +148,6 @@ def train_transformer(model: Module,
     scaler = torch.amp.GradScaler(
         device=config.device, enabled=config.device.startswith('cuda'))
 
-    # Initialize wandb if requested
-    if config.use_wandb:
-        wandb.init(project=config.project_name, name=config.experiment_name)
-        wandb.config.update(vars(config))
-
     # Load checkpoint if exists
     start_iter, loss_history = checkpoint_manager.load_latest_checkpoint(
         model, optimizer, scheduler)
@@ -196,14 +189,6 @@ def train_transformer(model: Module,
                     f'Val Loss: {losses[DataSplit.VALIDATION.name]:.4f}'
                 )
 
-                # WandB logging
-                if config.use_wandb:
-                    wandb.log({
-                        'train_loss': losses[DataSplit.TRAIN.name],
-                        'val_loss': losses[DataSplit.VALIDATION.name],
-                        'learning_rate': optimizer.param_groups[0]['lr']
-                    }, step=iter_num)
-
             # Training step
             xb, yb = get_batch_for_split(DataSplit.TRAIN)
 
@@ -236,11 +221,7 @@ def train_transformer(model: Module,
 
     except Exception as e:
         logging.error(f"Training failed with error: {str(e)}")
-        raise
-
-    finally:
-        if config.use_wandb:
-            wandb.finish()
+        raise e
 
     # Final evaluation
     final_losses = estimate_loss(model, config.eval_iterations,
