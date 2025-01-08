@@ -15,7 +15,7 @@ class SimpleDecoderTransformer(nn.Module):
         self._position_embeddings_table = nn.Embedding(self._config.context_length, self._config.embedding_dim)
         # We essentially repeat the above multiple times.
         self._blocks = nn.Sequential(
-            *[DecoderBlock(self._config.embedding_dim, self._config.number_of_heads, self._context_length, self._config.linear_layer_scale, self._config.dropout) for _ in range(self._config.number_of_layers)])
+            *[DecoderBlock(self._config.embedding_dim, self._config.number_of_heads, self._config.context_length, self._config.linear_layer_scale, self._config.dropout) for _ in range(self._config.number_of_layers)])
         self._layernorm = nn.LayerNorm(self._config.embedding_dim)
         self._lm_head = nn.Linear(self._config.embedding_dim, self._config.vocabulary_size)
 
