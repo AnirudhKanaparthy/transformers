@@ -12,21 +12,7 @@ from torch.optim.lr_scheduler import _LRScheduler
 
 from tqdm.auto import tqdm
 
-from constants import DataSplit
-
-
-@dataclass
-class TrainingConfig:
-    batch_size: int
-    context_length: int
-    maximum_iterations: int
-    eval_intervals: int
-    eval_iterations: int
-    checkpoint_interval: int
-    checkpoint_dir: str
-    device: str = 'cpu'
-    project_name: str = 'transformer_training'
-    experiment_name: str = f'run_{int(time.time())}'
+from utils import DataSplit, TrainingConfig
 
 
 class CheckpointManager:

@@ -2,32 +2,22 @@ import torch
 from torch import nn, Tensor
 from torch.nn import functional as F
 
+from utils import TransformerConfig
 from blocks import DecoderBlock
 
 
 class SimpleDecoderTransformer(nn.Module):
-    def __init__(self,
-                 vocabulary_size: int,
-                 embedding_dim: int,
-                 context_length: int,
-                 number_of_layers: int,
-                 number_of_heads: int = 1,
-                 linear_layer_scale: int = 4,
-                 dropout: float = 0.5,
-                 device: str = 'cpu'):
+    def __init__(self, config: TransformerConfig):
         super().__init__()
-        self._device = device
-        self._context_length = context_length
-        self._token_embeddings_table = nn.Embedding(
-            vocabulary_size, embedding_dim)
-        self._position_embeddings_table = nn.Embedding(
-            context_length, embedding_dim)
+        self._config = config
 
+        self._token_embeddings_table = nn.Embedding(self._config.vocabulary_size, self._config.embedding_dim)
+        self._position_embeddings_table = nn.Embedding(self._config.context_length, self._config.embedding_dim)
         # We essentially repeat the above multiple times.
         self._blocks = nn.Sequential(
-            *[DecoderBlock(embedding_dim, number_of_heads, self._context_length, linear_layer_scale, dropout) for _ in range(number_of_layers)])
-        self._layernorm = nn.LayerNorm(embedding_dim)
-        self._lm_head = nn.Linear(embedding_dim, vocabulary_size)
+            *[DecoderBlock(self._config.embedding_dim, self._config.number_of_heads, self._context_length, self._config.linear_layer_scale, self._config.dropout) for _ in range(self._config.number_of_layers)])
+        self._layernorm = nn.LayerNorm(self._config.embedding_dim)
+        self._lm_head = nn.Linear(self._config.embedding_dim, self._config.vocabulary_size)
 
     def forward(self, idx: Tensor) -> Tensor:
         # idx and targets are tensors of shape (Batch Size, Context Length)
@@ -36,7 +26,7 @@ class SimpleDecoderTransformer(nn.Module):
 
         token_embd = self._token_embeddings_table(idx)  # (B, T, C)
         pos_embd = self._position_embeddings_table(
-            torch.arange(T, device=self._device))
+            torch.arange(T, device=self._config.device))
         x = token_embd + pos_embd
 
         x = self._blocks(x)
@@ -57,7 +47,7 @@ class SimpleDecoderTransformer(nn.Module):
         for _ in range(max_next_tokens):
             # The input contains batches. We take in all the batches
             # and within those branches we take in the last `context_length` number of token
-            idx_cond = idx[:, -self._context_length:]
+            idx_cond = idx[:, -self._config.context_length:]
 
             logits = self(idx_cond)
 
